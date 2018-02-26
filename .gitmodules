@@ -1,0 +1,3 @@
+[submodule "gecko_external_vr"]
+	path = gecko_external_vr
+	url = git@github.com:kearwood/gecko-external-vr.git
