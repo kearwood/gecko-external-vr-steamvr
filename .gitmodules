@@ -1,3 +1,6 @@
 [submodule "gecko_external_vr"]
-	path = gecko_external_vr
+	path = 3rdparty/gecko_external_vr
 	url = git@github.com:kearwood/gecko-external-vr.git
+[submodule "3rdparty/openvr"]
+	path = 3rdparty/openvr
+	url = git@github.com:ValveSoftware/openvr.git
