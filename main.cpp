@@ -17,75 +17,96 @@
 #include <unistd.h>
 #endif // defined(__APPLE__)
 
+#include <openvr.h>
+#include <kraken-math.h>
 #include "gecko_vr.h"
 
 #define M_PI 3.14159265358979323846264338327950288
 
 using namespace mozilla::gfx;
+using namespace kraken;
+
+::vr::IVRSystem* mVRSystem = nullptr;
+::vr::IVRChaperone* mVRChaperone = nullptr;
+::vr::IVRCompositor* mVRCompositor = nullptr;
+
+void UpdateStageParameters(VRDisplayState& state);
+void UpdateEyeParameters(VRDisplayState& state, kraken::Matrix4* headToEyeTransforms = nullptr);
+void CalcViewMatrices(VRSystemState& state, const Matrix4* aHeadToEyeTransforms);
+void GetSensorState(VRSystemState& state);
 
 int main(int argc, char **argv) {
+  if (!::vr::VR_IsHmdPresent()) {
+    fprintf(stderr, "No HMD detected, VR_IsHmdPresent returned false.\n");
+    return EXIT_FAILURE;
+  }
+
+ ::vr::HmdError err;
+
+  ::vr::VR_Init(&err, ::vr::EVRApplicationType::VRApplication_Scene);
+  if (err) {
+    return EXIT_FAILURE;
+  }
+
+  mVRSystem = (::vr::IVRSystem *)::vr::VR_GetGenericInterface(::vr::IVRSystem_Version, &err);
+  if (err || !mVRSystem) {
+    ::vr::VR_Shutdown();
+    return EXIT_FAILURE;
+  }
+  mVRChaperone = (::vr::IVRChaperone *)::vr::VR_GetGenericInterface(::vr::IVRChaperone_Version, &err);
+  if (err || !mVRChaperone) {
+    ::vr::VR_Shutdown();
+    return EXIT_FAILURE;
+  }
+  mVRCompositor = (::vr::IVRCompositor*)::vr::VR_GetGenericInterface(::vr::IVRCompositor_Version, &err);
+  if (err || !mVRCompositor) {
+    ::vr::VR_Shutdown();
+    return EXIT_FAILURE;
+  }
+
   if (!gecko_vr_init()) {
     fprintf(stderr, "Failied to initialize Gecko VR\n");
     return EXIT_FAILURE;
   }
 
-  VRSystemState state;
+  VRSystemState systemState;
+  memset(&systemState, 0, sizeof(systemState));
 
-  VRDisplayState& displayState = state.displayState;
-  memset(&displayState, 0, sizeof(displayState));
+  VRDisplayState& state = systemState.displayState;
+  
 
-  strncpy_s(displayState.mDisplayName, "HelloVR HMD", kVRDisplayNameMaxLen);
-  displayState.mIsConnected = true;
-  displayState.mIsMounted = true;
-  displayState.mCapabilityFlags = (VRDisplayCapabilityFlags)((int)(VRDisplayCapabilityFlags::Cap_None) |
-                                  (int)VRDisplayCapabilityFlags::Cap_Orientation |
-                                  (int)VRDisplayCapabilityFlags::Cap_Position |
-                                  (int)VRDisplayCapabilityFlags::Cap_External |
-                                  (int)VRDisplayCapabilityFlags::Cap_Present |
-                                  (int)VRDisplayCapabilityFlags::Cap_StageParameters |
-                                  (int)VRDisplayCapabilityFlags::Cap_MountDetection);
+  strncpy_s(state.mDisplayName, "OpenVR HMD", kVRDisplayNameMaxLen);
+  state.mIsConnected = mVRSystem->IsTrackedDeviceConnected(::vr::k_unTrackedDeviceIndex_Hmd);
+  state.mIsMounted = false;
+  state.mCapabilityFlags = (VRDisplayCapabilityFlags)((int)VRDisplayCapabilityFlags::Cap_None |
+    (int)VRDisplayCapabilityFlags::Cap_Orientation |
+    (int)VRDisplayCapabilityFlags::Cap_Position |
+    (int)VRDisplayCapabilityFlags::Cap_External |
+    (int)VRDisplayCapabilityFlags::Cap_Present |
+    (int)VRDisplayCapabilityFlags::Cap_StageParameters);
 
-  displayState.mEyeResolution.width = 1280;
-  displayState.mEyeResolution.height = 800;
-
-  for (uint32_t eye = 0; eye < 2; ++eye) {
-    float left, right, up, down;
-    // TODO - Implement real values
-    left = -0.785398f; // 45 degrees
-    right = 0.785398f; // 45 degrees
-    up = -0.785398f; // 45 degrees
-    down = 0.785398f; // 45 degrees
-
-    displayState.mEyeFOV[eye].upDegrees = atan(up) * 180.0 / M_PI;
-    displayState.mEyeFOV[eye].rightDegrees = atan(right) * 180.0 / M_PI;
-    displayState.mEyeFOV[eye].downDegrees = atan(down) * 180.0 / M_PI;
-    displayState.mEyeFOV[eye].leftDegrees = atan(left) * 180.0 / M_PI;
+  {
+    ::vr::ETrackedPropertyError err;
+    bool bHasProximitySensor = mVRSystem->GetBoolTrackedDeviceProperty(::vr::k_unTrackedDeviceIndex_Hmd, ::vr::Prop_ContainsProximitySensor_Bool, &err);
+    if (err == ::vr::TrackedProp_Success && bHasProximitySensor) {
+      state.mCapabilityFlags = (VRDisplayCapabilityFlags)((int)state.mCapabilityFlags | (int)VRDisplayCapabilityFlags::Cap_MountDetection);
+    }
   }
 
-  displayState.mStageSize.width = 1.0f;
-  displayState.mStageSize.height = 1.0f;
+  mVRCompositor->SetTrackingSpace(::vr::TrackingUniverseSeated);
 
-  displayState.mSittingToStandingTransform[0] = 1.0f;
-  displayState.mSittingToStandingTransform[1] = 0.0f;
-  displayState.mSittingToStandingTransform[2] = 0.0f;
-  displayState.mSittingToStandingTransform[3] = 0.0f;
+  uint32_t w, h;
+  mVRSystem->GetRecommendedRenderTargetSize(&w, &h);
+  state.mEyeResolution.width = w;
+  state.mEyeResolution.height = h;
 
-  displayState.mSittingToStandingTransform[4] = 0.0f;
-  displayState.mSittingToStandingTransform[5] = 1.0f;
-  displayState.mSittingToStandingTransform[6] = 0.0f;
-  displayState.mSittingToStandingTransform[7] = 0.0f;
+  // default to an identity quaternion
+  systemState.sensorState.orientation[3] = 1.0f;
 
-  displayState.mSittingToStandingTransform[8] = 0.0f;
-  displayState.mSittingToStandingTransform[9] = 0.0f;
-  displayState.mSittingToStandingTransform[10] = 1.0f;
-  displayState.mSittingToStandingTransform[11] = 0.0f;
+  UpdateStageParameters(state);
+  UpdateEyeParameters(state);
 
-  displayState.mSittingToStandingTransform[12] = 0.0f;
-  displayState.mSittingToStandingTransform[13] = 0.75f;
-  displayState.mSittingToStandingTransform[14] = 0.0f;
-  displayState.mSittingToStandingTransform[15] = 1.0f;
-
-  VRHMDSensorState& sensorState = state.sensorState;
+  VRHMDSensorState& sensorState = systemState.sensorState;
   sensorState.flags = (VRDisplayCapabilityFlags)(
     (int)VRDisplayCapabilityFlags::Cap_Orientation |
     (int)VRDisplayCapabilityFlags::Cap_Position);
@@ -93,12 +114,181 @@ int main(int argc, char **argv) {
 
   for(int frame = 0; frame < 1000; frame++) {
     fprintf(stdout, "Frame %i\n", frame);
-    gecko_vr_push_state(state);
+    GetSensorState(systemState);
+    
+    gecko_vr_push_state(systemState);
+/*
     std::this_thread::sleep_for(std::chrono::milliseconds(11));
 
     sensorState.inputFrameID++;
     sensorState.timestamp += 1.0f / 90.0f;
+*/
   }
 
   gecko_vr_shutdown();
+}
+
+
+void
+UpdateStageParameters(VRDisplayState& state)
+{
+  float sizeX = 0.0f;
+  float sizeZ = 0.0f;
+  if (mVRChaperone->GetPlayAreaSize(&sizeX, &sizeZ)) {
+    ::vr::HmdMatrix34_t t = mVRSystem->GetSeatedZeroPoseToStandingAbsoluteTrackingPose();
+    state.mStageSize.width = sizeX;
+    state.mStageSize.height = sizeZ;
+
+    state.mSittingToStandingTransform[0] = t.m[0][0];
+    state.mSittingToStandingTransform[1] = t.m[1][0];
+    state.mSittingToStandingTransform[2] = t.m[2][0];
+    state.mSittingToStandingTransform[3] = 0.0f;
+
+    state.mSittingToStandingTransform[4] = t.m[0][1];
+    state.mSittingToStandingTransform[5] = t.m[1][1];
+    state.mSittingToStandingTransform[6] = t.m[2][1];
+    state.mSittingToStandingTransform[7] = 0.0f;
+
+    state.mSittingToStandingTransform[8] = t.m[0][2];
+    state.mSittingToStandingTransform[9] = t.m[1][2];
+    state.mSittingToStandingTransform[10] = t.m[2][2];
+    state.mSittingToStandingTransform[11] = 0.0f;
+
+    state.mSittingToStandingTransform[12] = t.m[0][3];
+    state.mSittingToStandingTransform[13] = t.m[1][3];
+    state.mSittingToStandingTransform[14] = t.m[2][3];
+    state.mSittingToStandingTransform[15] = 1.0f;
+  } else {
+    // If we fail, fall back to reasonable defaults.
+    // 1m x 1m space, 0.75m high in seated position
+
+    state.mStageSize.width = 1.0f;
+    state.mStageSize.height = 1.0f;
+
+    state.mSittingToStandingTransform[0] = 1.0f;
+    state.mSittingToStandingTransform[1] = 0.0f;
+    state.mSittingToStandingTransform[2] = 0.0f;
+    state.mSittingToStandingTransform[3] = 0.0f;
+
+    state.mSittingToStandingTransform[4] = 0.0f;
+    state.mSittingToStandingTransform[5] = 1.0f;
+    state.mSittingToStandingTransform[6] = 0.0f;
+    state.mSittingToStandingTransform[7] = 0.0f;
+
+    state.mSittingToStandingTransform[8] = 0.0f;
+    state.mSittingToStandingTransform[9] = 0.0f;
+    state.mSittingToStandingTransform[10] = 1.0f;
+    state.mSittingToStandingTransform[11] = 0.0f;
+
+    state.mSittingToStandingTransform[12] = 0.0f;
+    state.mSittingToStandingTransform[13] = 0.75f;
+    state.mSittingToStandingTransform[14] = 0.0f;
+    state.mSittingToStandingTransform[15] = 1.0f;
+  }
+}
+
+void
+UpdateEyeParameters(VRDisplayState& state, Matrix4* headToEyeTransforms /* = nullptr */)
+{
+  for (uint32_t eye = 0; eye < 2; ++eye) {
+    ::vr::HmdMatrix34_t eyeToHead = mVRSystem->GetEyeToHeadTransform(static_cast<::vr::Hmd_Eye>(eye));
+    state.mEyeTranslation[eye].x = eyeToHead.m[0][3];
+    state.mEyeTranslation[eye].y = eyeToHead.m[1][3];
+    state.mEyeTranslation[eye].z = eyeToHead.m[2][3];
+
+    float left, right, up, down;
+    mVRSystem->GetProjectionRaw(static_cast<::vr::Hmd_Eye>(eye), &left, &right, &up, &down);
+    state.mEyeFOV[eye].upDegrees = atan(-up) * 180.0 / M_PI;
+    state.mEyeFOV[eye].rightDegrees = atan(right) * 180.0 / M_PI;
+    state.mEyeFOV[eye].downDegrees = atan(down) * 180.0 / M_PI;
+    state.mEyeFOV[eye].leftDegrees = atan(-left) * 180.0 / M_PI;
+
+    if (headToEyeTransforms) {
+      Matrix4 pose;
+      // NOTE! eyeToHead.m is a 3x4 matrix, not 4x4.  But
+      // because of its arrangement, we can copy the 12 elements in and
+      // then transpose them to the right place.
+      memcpy(pose.c, &eyeToHead.m, sizeof(eyeToHead.m));
+      pose.transpose();
+      pose.invert();
+      headToEyeTransforms[eye] = pose;
+    }
+  }
+}
+
+void
+GetSensorState(VRSystemState& state)
+{
+  const uint32_t posesSize = ::vr::k_unTrackedDeviceIndex_Hmd + 1;
+  ::vr::TrackedDevicePose_t poses[posesSize];
+  // Note: We *must* call WaitGetPoses in order for any rendering to happen at all.
+  mVRCompositor->WaitGetPoses(nullptr, 0, poses, posesSize);
+  Matrix4 headToEyeTransforms[2];
+  UpdateEyeParameters(state.displayState, headToEyeTransforms);
+
+  ::vr::Compositor_FrameTiming timing;
+  timing.m_nSize = sizeof(::vr::Compositor_FrameTiming);
+  if (mVRCompositor->GetFrameTiming(&timing)) {
+    state.sensorState.timestamp = timing.m_flSystemTimeInSeconds;
+  } else {
+    // This should not happen, but log it just in case
+    fprintf(stderr, "OpenVR - IVRCompositor::GetFrameTiming failed");
+  }
+
+  if (poses[::vr::k_unTrackedDeviceIndex_Hmd].bDeviceIsConnected &&
+    poses[::vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid &&
+    poses[::vr::k_unTrackedDeviceIndex_Hmd].eTrackingResult == ::vr::TrackingResult_Running_OK)
+  {
+    const ::vr::TrackedDevicePose_t& pose = poses[::vr::k_unTrackedDeviceIndex_Hmd];
+
+    Matrix4 m;
+    // NOTE! mDeviceToAbsoluteTracking is a 3x4 matrix, not 4x4.  But
+    // because of its arrangement, we can copy the 12 elements in and
+    // then transpose them to the right place.  We do this so we can
+    // pull out a Quaternion.
+    memcpy(m.c, &pose.mDeviceToAbsoluteTracking, sizeof(pose.mDeviceToAbsoluteTracking));
+    m.transpose();
+
+    Quaternion rot = Quaternion::FromRotationMatrix(m);
+    rot.invert();
+
+    state.sensorState.flags = (VRDisplayCapabilityFlags)((int)state.sensorState.flags | (int)VRDisplayCapabilityFlags::Cap_Orientation);
+    state.sensorState.orientation[0] = rot.x;
+    state.sensorState.orientation[1] = rot.y;
+    state.sensorState.orientation[2] = rot.z;
+    state.sensorState.orientation[3] = rot.w;
+    state.sensorState.angularVelocity[0] = pose.vAngularVelocity.v[0];
+    state.sensorState.angularVelocity[1] = pose.vAngularVelocity.v[1];
+    state.sensorState.angularVelocity[2] = pose.vAngularVelocity.v[2];
+
+    state.sensorState.flags =(VRDisplayCapabilityFlags)((int)state.sensorState.flags | (int)VRDisplayCapabilityFlags::Cap_Position);
+    state.sensorState.position[0] = m.c[12];
+    state.sensorState.position[1] = m.c[13];
+    state.sensorState.position[2] = m.c[14];
+    state.sensorState.linearVelocity[0] = pose.vVelocity.v[0];
+    state.sensorState.linearVelocity[1] = pose.vVelocity.v[1];
+    state.sensorState.linearVelocity[2] = pose.vVelocity.v[2];
+  }
+
+  CalcViewMatrices(state, headToEyeTransforms);
+  state.sensorState.inputFrameID++;
+}
+
+void
+CalcViewMatrices(VRSystemState& state, const Matrix4* aHeadToEyeTransforms)
+{
+
+  Matrix4 matHead;
+  if ((int)state.sensorState.flags & (int)VRDisplayCapabilityFlags::Cap_Orientation) {
+    matHead = Quaternion::Create(state.sensorState.orientation[0], state.sensorState.orientation[1],
+      state.sensorState.orientation[2], state.sensorState.orientation[3]).rotationMatrix();
+  }
+  matHead = Matrix4::Translation(Vector3::Create(-state.sensorState.position[0], -state.sensorState.position[1], -state.sensorState.position[2])) * matHead;
+
+  Matrix4 matView = matHead * aHeadToEyeTransforms[VRDisplayState::Eye_Left];
+  // matView.normalize(); // FINDME!! TODO! Do we need to normalize here?
+  memcpy(state.sensorState.leftViewMatrix, matView.c, sizeof(matView.c));
+  matView = matHead * aHeadToEyeTransforms[VRDisplayState::Eye_Right];
+ // matView.normalize(); // FINDME!! TODO! Do we need to normalize here?
+  memcpy(state.sensorState.rightViewMatrix, matView.c, sizeof(matView.c));
 }

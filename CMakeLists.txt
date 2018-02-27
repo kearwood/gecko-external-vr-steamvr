@@ -22,7 +22,7 @@ macro (add_sources)
     endif()
 endmacro()
 
-project (hellovr)
+project (gecko-steamvr)
 include_directories(3rdparty/gecko_external_vr/include)
 include_directories(3rdparty/kraken-math/include)
 include_directories(3rdparty/openvr/headers)
@@ -41,3 +41,6 @@ add_sources(3rdparty/kraken-math/src/vector3.cpp)
 add_sources(3rdparty/kraken-math/src/vector4.cpp)
 
 add_executable(gecko-steamvr ${SRCS})
+
+configure_file(${CMAKE_SOURCE_DIR}/3rdparty/openvr/bin/win64/openvr_api.dll ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
+target_link_libraries(gecko-steamvr ${CMAKE_SOURCE_DIR}/3rdparty/openvr/lib/win64/openvr_api.lib)
