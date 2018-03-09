@@ -27,6 +27,7 @@ include_directories(3rdparty/gecko_external_vr/include)
 include_directories(3rdparty/kraken-math/include)
 include_directories(3rdparty/openvr/headers)
 add_sources(main.cpp)
+add_sources(OpenVRSession.cpp)
 add_sources(3rdparty/gecko_external_vr/src/gecko_vr.cpp)
 
 add_sources(3rdparty/kraken-math/src/aabb.cpp)
