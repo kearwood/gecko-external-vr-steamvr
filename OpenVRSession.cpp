@@ -195,6 +195,7 @@ OpenVRSession::UpdateEyeParameters(VRDisplayState& state, Matrix4* headToEyeTran
 
     if (headToEyeTransforms) {
       Matrix4 pose;
+      pose.init();
       // NOTE! eyeToHead.m is a 3x4 matrix, not 4x4.  But
       // because of its arrangement, we can copy the 12 elements in and
       // then transpose them to the right place.
@@ -232,6 +233,7 @@ OpenVRSession::GetSensorState(VRSystemState& state)
     const ::vr::TrackedDevicePose_t& pose = poses[::vr::k_unTrackedDeviceIndex_Hmd];
 
     Matrix4 m;
+    m.init();
     // NOTE! mDeviceToAbsoluteTracking is a 3x4 matrix, not 4x4.  But
     // because of its arrangement, we can copy the 12 elements in and
     // then transpose them to the right place.  We do this so we can
